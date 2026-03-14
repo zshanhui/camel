@@ -14,8 +14,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Default region is ap-southeast-1 (Singapore); override via AWS_REGION or --region.
-REGION="${AWS_REGION:-ap-southeast-1}"
+# Region is us-east-2 (Ohio); override via AWS_REGION env var.
+REGION="${AWS_REGION:-us-east-2}"
 AMI_ID="ami-06290d70feea35450"
 INSTANCE_TYPE="${STWEBAGENTBENCH_INSTANCE_TYPE:-t3a.xlarge}"
 TAG_NAME="${STWEBAGENTBENCH_TAG:-st-webagentbench}"
@@ -45,7 +45,6 @@ Required:
 Options:
   --key-file PATH     Path to private key for SSH (default: ~/.ssh/<key-name>.pem)
   --instance-type T   Instance type (default: $INSTANCE_TYPE)
-  --region R          AWS region (default: $REGION)
   --tag NAME         Tag for teardown (default: $TAG_NAME)
   --skip-suitecrm     Skip SuiteCRM setup (GitLab + ShoppingAdmin only)
   --dry-run           Show what would be done without provisioning
@@ -70,7 +69,6 @@ while [[ $# -gt 0 ]]; do
         --key-name)   KEY_NAME="$2"; shift 2 ;;
         --key-file)   KEY_FILE="$2"; shift 2 ;;
         --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
-        --region)     REGION="$2"; shift 2 ;;
         --tag)        TAG_NAME="$2"; shift 2 ;;
         --skip-suitecrm) SKIP_SUITECRM=true; shift ;;
         --dry-run)    DRY_RUN=true; shift ;;
@@ -225,8 +223,8 @@ run_ssh "docker start kiwix33 2>/dev/null || true"
 if run_ssh "test -d /home/ubuntu/openstreetmap-website" 2>/dev/null; then
     run_ssh "cd /home/ubuntu/openstreetmap-website && docker compose start 2>/dev/null || true"
 fi
-log_info "Waiting 60s for services to start..."
-sleep 60
+log_info "Waiting 120s for services to start (GitLab is slow)..."
+sleep 120
 
 log_info "Configuring base URLs for hostname $HOSTNAME..."
 run_ssh "docker exec shopping /var/www/magento2/bin/magento setup:store-config:set --base-url=\"http://${HOSTNAME}:7770\" 2>/dev/null || true"
@@ -237,8 +235,35 @@ run_ssh "docker exec shopping /var/www/magento2/bin/magento cache:flush 2>/dev/n
 run_ssh "docker exec shopping_admin /var/www/magento2/bin/magento setup:store-config:set --base-url=\"http://${HOSTNAME}:7780\" 2>/dev/null || true"
 run_ssh "docker exec shopping_admin mysql -u magentouser -pMyPassword magentodb -e \"UPDATE core_config_data SET value='http://${HOSTNAME}:7780/' WHERE path = 'web/secure/base_url';\" 2>/dev/null || true"
 run_ssh "docker exec shopping_admin /var/www/magento2/bin/magento cache:flush 2>/dev/null || true"
+
+# GitLab: wait for PostgreSQL to be ready before reconfigure (avoids "database is still not available")
+log_info "Waiting for GitLab PostgreSQL to be ready (up to 5 min)..."
+GITLAB_READY=false
+for i in $(seq 1 20); do
+    if run_ssh "docker exec gitlab gitlab-ctl status 2>/dev/null | grep -qE '^run: postgresql:'"; then
+        GITLAB_READY=true
+        log_info "GitLab PostgreSQL is ready"
+        break
+    fi
+    [[ $i -eq 20 ]] && log_warn "GitLab PostgreSQL not ready after 5 min; reconfigure may fail"
+    sleep 15
+done
+
 run_ssh "docker exec gitlab sed -i \"s|^external_url.*|external_url 'http://${HOSTNAME}:8023'|\" /etc/gitlab/gitlab.rb 2>/dev/null || true"
-run_ssh "docker exec gitlab gitlab-ctl reconfigure 2>/dev/null || true"
+# Retry gitlab-ctl reconfigure (can fail if DB not ready; each run takes ~1-2 min)
+for attempt in 1 2 3; do
+    log_info "Running gitlab-ctl reconfigure (attempt $attempt/3)..."
+    if run_ssh "docker exec gitlab gitlab-ctl reconfigure"; then
+        log_info "GitLab reconfigure succeeded"
+        break
+    fi
+    if [[ $attempt -lt 3 ]]; then
+        log_warn "GitLab reconfigure failed, waiting 90s before retry..."
+        sleep 90
+    else
+        log_warn "GitLab reconfigure failed after 3 attempts. GitLab may still work; run manually: docker exec gitlab gitlab-ctl reconfigure"
+    fi
+done
 
 # iptables redirect if services not accessible (per WebArena README)
 run_ssh "sudo iptables -t nat -A PREROUTING -p tcp --dport 7770 -j REDIRECT --to-port 7770 2>/dev/null || true"

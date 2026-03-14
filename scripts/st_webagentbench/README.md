@@ -50,12 +50,12 @@ GitLab is particularly memory-heavy; if your Docker Desktop/daemon has less than
 **Usage:**
 ```bash
 ./provision_aws.sh --key-name your-ec2-key-name
-# Optional: --key-file /path/to/key.pem --region ap-southeast-1 --skip-suitecrm
+# Optional: --key-file /path/to/key.pem --skip-suitecrm
 ```
 
 **Environment:** Set `STWEBAGENTBENCH_VPC_ID` if you have no default VPC (e.g. `export STWEBAGENTBENCH_VPC_ID=vpc-xxxxx`).
 
-**Prerequisites:** AWS CLI configured, EC2 key pair in your chosen region (default: ap-southeast-1/Singapore).
+**Prerequisites:** AWS CLI configured, EC2 key pair in us-east-2 (Ohio).
 
 ## AWS Teardown
 

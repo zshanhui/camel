@@ -104,7 +104,10 @@ if [[ ${#INSTANCE_IDS[@]} -eq 0 ]]; then
     fi
     if [[ ${#INSTANCE_IDS[@]} -eq 0 ]]; then
         log_info "Discovering instances with tag ${TAG_NAME}=benchmark..."
-        mapfile -t DISCOVERED < <(aws ec2 describe-instances \
+        DISCOVERED=()
+        while IFS= read -r id; do
+            [[ -n "$id" ]] && DISCOVERED+=("$id")
+        done < <(aws ec2 describe-instances \
             --filters "Name=tag:${TAG_NAME},Values=benchmark" "Name=instance-state-name,Values=running,pending,stopping,stopped" \
             --query 'Reservations[*].Instances[*].InstanceId' \
             --output text 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
