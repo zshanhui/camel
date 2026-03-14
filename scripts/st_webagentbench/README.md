@@ -44,13 +44,26 @@ GitLab is particularly memory-heavy; if your Docker Desktop/daemon has less than
 2. Launches WebArena AMI instance (GitLab + ShoppingAdmin)
 3. Allocates Elastic IP and associates it
 4. SSHs in and configures base URLs for services
-5. Optionally starts SuiteCRM (Bitnami) for full 375-task benchmark
+5. With `--all` (default): Magento (t3a.medium), GitLab (t3a.medium), SuiteCRM (t3a.small), each on its own instance
 6. Outputs `.env.provisioned` with URLs
 
 **Usage:**
 ```bash
 ./provision_aws.sh --key-name your-ec2-key-name
-# Optional: --key-file /path/to/key.pem --skip-suitecrm
+# Default: --all (Magento + GitLab + SuiteCRM, each on its own instance)
+
+# Or select apps:
+#   --all       Provision all (Magento + GitLab + SuiteCRM)
+#   --shopadmin Provision Magento stack only
+#   --gitlab    Provision GitLab only (t3a.medium)
+#   --suitecrm  Provision SuiteCRM only (t3a.small)
+
+# List running instances (no provisioning, no key-name required):
+./provision_aws.sh --running-instances
+# With custom tag: ./provision_aws.sh --tag my-bench --running-instances
+
+# Optional: --key-file /path/to/key.pem
+# Optional: --gitlab-instance-type t3a.medium  --suitecrm-instance-type t3a.small
 ```
 
 **Environment:** Set `STWEBAGENTBENCH_VPC_ID` if you have no default VPC (e.g. `export STWEBAGENTBENCH_VPC_ID=vpc-xxxxx`).

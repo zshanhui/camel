@@ -26,6 +26,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REGION="${AWS_REGION:-us-east-2}"
 DRY_RUN=false
 TAG_NAME="${STWEBAGENTBENCH_TAG:-st-webagentbench}"
 INSTANCE_IDS=()
@@ -48,7 +49,7 @@ Shutdown and delete AWS resources used for ST-WebAgentBench benchmarking.
 
 Options:
   --tag NAME       Find instances by tag (default: ${TAG_NAME})
-                   Tag filter: Name=tag:NAME,Values=benchmark
+                   Tag filter: Name=tag:NAME,Values=benchmark,suitecrm,gitlab (main + GitLab + SuiteCRM)
   --dry-run        Show resources that would be deleted without deleting
   -h, --help       Show this help
 
@@ -107,8 +108,8 @@ if [[ ${#INSTANCE_IDS[@]} -eq 0 ]]; then
         DISCOVERED=()
         while IFS= read -r id; do
             [[ -n "$id" ]] && DISCOVERED+=("$id")
-        done < <(aws ec2 describe-instances \
-            --filters "Name=tag:${TAG_NAME},Values=benchmark" "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+        done < <(aws ec2 describe-instances --region "$REGION" \
+            --filters "Name=tag:${TAG_NAME},Values=benchmark,suitecrm,gitlab" "Name=instance-state-name,Values=running,pending,stopping,stopped" \
             --query 'Reservations[*].Instances[*].InstanceId' \
             --output text 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)
         INSTANCE_IDS=("${DISCOVERED[@]}")
@@ -128,7 +129,7 @@ log_info "Instances to terminate: ${INSTANCE_IDS[*]}"
 # Collect Elastic IPs allocated by these instances before termination
 ALLOCATION_IDS=()
 for iid in "${INSTANCE_IDS[@]}"; do
-    alloc=$(aws ec2 describe-addresses \
+    alloc=$(aws ec2 describe-addresses --region "$REGION" \
         --filters "Name=instance-id,Values=${iid}" \
         --query 'Addresses[*].AllocationId' \
         --output text 2>/dev/null || true)
@@ -150,7 +151,7 @@ fi
 
 # Terminate instances
 log_info "Terminating ${#INSTANCE_IDS[@]} instance(s)..."
-if aws ec2 terminate-instances --instance-ids "${INSTANCE_IDS[@]}"; then
+if aws ec2 terminate-instances --region "$REGION" --instance-ids "${INSTANCE_IDS[@]}"; then
     log_info "Termination initiated. Instances may take a few minutes to fully stop."
 else
     log_error "Failed to terminate instances"
@@ -160,10 +161,10 @@ fi
 # Release Elastic IPs (must do after instance is terminated or disassociated)
 if [[ ${#ALLOCATION_IDS[@]} -gt 0 ]]; then
     log_info "Waiting for instances to enter 'terminated' state before releasing Elastic IPs..."
-    aws ec2 wait instance-terminated --instance-ids "${INSTANCE_IDS[@]}" 2>/dev/null || true
+    aws ec2 wait instance-terminated --region "$REGION" --instance-ids "${INSTANCE_IDS[@]}" 2>/dev/null || true
 
     for alloc in "${ALLOCATION_IDS[@]}"; do
-        if aws ec2 release-address --allocation-id "$alloc" 2>/dev/null; then
+        if aws ec2 release-address --region "$REGION" --allocation-id "$alloc" 2>/dev/null; then
             log_info "Released Elastic IP: $alloc"
         else
             log_warn "Could not release Elastic IP $alloc (may already be released)"
